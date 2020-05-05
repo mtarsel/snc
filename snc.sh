@@ -5,18 +5,25 @@ set -exuo pipefail
 export LC_ALL=C
 export LANG=C
 
+ARCH=$(uname -m)
+
 INSTALL_DIR=crc-tmp-install-data
 JQ=${JQ:-jq}
 OC=${OC:-oc}
 YQ=${YQ:-yq}
 CRC_VM_NAME=${CRC_VM_NAME:-crc}
 BASE_DOMAIN=${CRC_BASE_DOMAIN:-testing}
-MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/clients/ocp}
+#MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/clients/ocp}
+MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/$ARCH/clients/ocp}
 CRC_PV_DIR="/mnt/pv-data"
 SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i id_rsa_crc"
 
+#OPENSHIFT_PULL_SECRET="$(cat secret)"
+OPENSHIFT_VERSION=4.3.18
+
 # If user defined the OPENSHIFT_VERSION environment variable then use it.
 # Otherwise use the tagged version if available
+
 if test -n "${OPENSHIFT_VERSION-}"; then
     OPENSHIFT_RELEASE_VERSION=${OPENSHIFT_VERSION}
     echo "Using release ${OPENSHIFT_RELEASE_VERSION} from OPENSHIFT_VERSION"
@@ -27,7 +34,7 @@ else
     else
         OPENSHIFT_RELEASE_VERSION="$(curl -L "${MIRROR}"/latest/release.txt | sed -n 's/^ *Version: *//p')"
         if test -n "${OPENSHIFT_RELEASE_VERSION}"; then
-            echo "Using release ${OPENSHIFT_RELEASE_VERSION} from the latest mirror"
+            echo "Using release ${OPENSHIFT_RELEASE_VERSION} from latest  mirror"
         else
             echo "Unable to determine an OpenShift release version.  You may want to set the OPENSHIFT_VERSION environment variable explicitly."
             exit 1
@@ -165,8 +172,12 @@ fi
 # Download yq for manipulating in place yaml configs
 if ! which ${YQ}; then
     if [[ ! -e yq ]]; then
-        curl -L https://github.com/mikefarah/yq/releases/download/3.3.0/yq_linux_amd64 -o yq
-        chmod +x yq
+	if [ $ARCH == "ppc64le" ]; then
+        	curl -L https://github.com/mikefarah/yq/releases/download/3.3.0/yq_linux_ppc64le -o yq
+	else
+		curl -L https://github.com/mikefarah/yq/releases/download/3.3.0/yq_linux_amd64 -o yq
+	fi
+	chmod +x yq
     fi
     YQ=./yq
 fi
@@ -298,7 +309,10 @@ ${OC} delete statefulset,deployment,daemonset --all -n openshift-insights
 ${OC} delete statefulset,deployment,daemonset --all -n openshift-cloud-credential-operator
 
 # Clean-up 'openshift-cluster-storage-operator' namespace
-delete_operator "deployment.apps/csi-snapshot-controller-operator" "openshift-cluster-storage-operator" "app=csi-snapshot-controller-operator"
+#TODO error here!!
+#delete_operator "deployment.apps/csi-snapshot-controller-operator" "openshift-cluster-storage-operator" "app=csi-snapshot-controller-operator"
+
+
 ${OC} delete statefulset,deployment,daemonset --all -n openshift-cluster-storage-operator
 
 # Clean-up 'openshift-kube-storage-version-migrator-operator' namespace
