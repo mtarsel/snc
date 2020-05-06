@@ -6,20 +6,19 @@ export LC_ALL=C
 export LANG=C
 
 ARCH=$(uname -m)
+#TODO - add $ARCH to filenames: install-config-$ARCH.yaml
+WORKING_DIR=/etc/snc
+SRC_DIR=$WORKING_DIR/src/snc
 
-INSTALL_DIR=crc-tmp-install-data
+INSTALL_DIR=$SRC_DIR/crc-tmp-install-data
 JQ=${JQ:-jq}
 OC=${OC:-oc}
 YQ=${YQ:-yq}
 CRC_VM_NAME=${CRC_VM_NAME:-crc}
 BASE_DOMAIN=${CRC_BASE_DOMAIN:-testing}
-#MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/clients/ocp}
 MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/$ARCH/clients/ocp}
 CRC_PV_DIR="/mnt/pv-data"
-SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i id_rsa_crc"
-
-#OPENSHIFT_PULL_SECRET="$(cat secret)"
-OPENSHIFT_VERSION=4.3.18
+SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i $SRC_DIR/id_rsa_crc"
 
 # If user defined the OPENSHIFT_VERSION environment variable then use it.
 # Otherwise use the tagged version if available
@@ -109,7 +108,7 @@ function create_pvs() {
     done
 
     # Apply registry pvc to bound with pv0001
-    ${OC} apply -f registry_pvc.yaml
+    ${OC} apply -f $SRC_DIR/registry_pvc.yaml
 
     # Add registry storage to pvc
     ${OC} patch config.imageregistry.operator.openshift.io/cluster --patch='[{"op": "add", "path": "/spec/storage/pvc", "value": {"claim": "crc-image-registry-storage"}}]' --type=json
@@ -121,12 +120,12 @@ function create_pvs() {
 # in order to trigger regeneration of the initial 24h certs the installer created on the cluster
 function renew_certificates() {
     # Get the cli image from release payload and update it to bootstrap-cred-manager resource
-    echo ${OPENSHIFT_PULL_SECRET} > pull-secret
-    cli_image=$(${OC} adm release -a pull-secret info ${OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE} --image-for=cli)
-    rm pull-secret
-    ${YQ} write --inplace kubelet-bootstrap-cred-manager-ds.yaml spec.template.spec.containers[0].image ${cli_image}
+    echo ${OPENSHIFT_PULL_SECRET} > $SRC_DIR/pull-secret
+    cli_image=$(${OC} adm release -a $SRC_DIR/pull-secret info ${OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE} --image-for=cli)
+    rm $SRC_DIR/pull-secret
+    ${YQ} write --inplace $SRC_DIR/kubelet-bootstrap-cred-manager-ds.yaml spec.template.spec.containers[0].image ${cli_image}
 
-    ${OC} apply -f kubelet-bootstrap-cred-manager-ds.yaml
+    ${OC} apply -f $SRC_DIR/kubelet-bootstrap-cred-manager-ds.yaml
 
     # Delete the current csr signer to get new request.
     ${OC} delete secrets/csr-signer-signer secrets/csr-signer -n openshift-kube-controller-manager-operator
@@ -166,7 +165,8 @@ if ! which ${OC}; then
     if [[ ! -e oc ]] ; then
         curl -L "${MIRROR}/${OPENSHIFT_RELEASE_VERSION}/openshift-client-linux-${OPENSHIFT_RELEASE_VERSION}.tar.gz" | tar zx oc
     fi
-    OC=./oc
+    mv ./oc $SRC_DIR
+    OC=$SRC_DIR/oc
 fi
 
 # Download yq for manipulating in place yaml configs
@@ -179,11 +179,13 @@ if ! which ${YQ}; then
 	fi
 	chmod +x yq
     fi
-    YQ=./yq
+    mv ./yq $SRC_DIR
+    YQ=$SRC_DIR/yq
 fi
 
 if ! which ${JQ}; then
     sudo yum -y install /usr/bin/jq
+    cp /usr/bin/jq $SRC_DIR
 fi
 
 if [ "${OPENSHIFT_PULL_SECRET}" = "" ]; then
@@ -198,12 +200,13 @@ echo "Setting OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE to ${OPENSHIFT_INSTALL_RE
 # Extract openshift-install binary if not present in current directory
 if test -z ${OPENSHIFT_INSTALL-}; then
     echo "Extracting installer binary from OpenShift baremetal-installer image"
-    echo ${OPENSHIFT_PULL_SECRET} > pull-secret
-    baremetal_installer_image=$(${OC} adm release -a pull-secret info ${OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE} --image-for=baremetal-installer)
-    ${OC} image -a pull-secret extract ${baremetal_installer_image} --confirm --path /usr/bin/openshift-install:.
+    echo ${OPENSHIFT_PULL_SECRET} > $SRC_DIR/pull-secret
+    baremetal_installer_image=$(${OC} adm release -a $SRC_DIR/pull-secret info ${OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE} --image-for=baremetal-installer)
+    ${OC} image -a $SRC_DIR/pull-secret extract ${baremetal_installer_image} --confirm --path /usr/bin/openshift-install:.
+    rm $SRC_DIR/pull-secret
     chmod +x openshift-install
-    rm pull-secret
-    OPENSHIFT_INSTALL=./openshift-install
+    mv ./openshift-install $SRC_DIR
+    OPENSHIFT_INSTALL=$SRC_DIR/openshift-install
 fi
 
 # Allow to disable debug by setting SNC_OPENSHIFT_INSTALL_NO_DEBUG in the environment
@@ -215,9 +218,8 @@ fi
 ${OPENSHIFT_INSTALL} --dir ${INSTALL_DIR} destroy cluster ${OPENSHIFT_INSTALL_EXTRA_ARGS} || echo "failed to destroy previous cluster.  Continuing anyway"
 # Generate a new ssh keypair for this cluster
 
-rm id_rsa_crc* || true
-ssh-keygen -N "" -f id_rsa_crc -C "core"
-
+rm $SRC_DIR/id_rsa_crc* || true
+ssh-keygen -N "" -f $SRC_DIR/id_rsa_crc -C "core"
 
 # Clean up old DNS overlay file
 if [ -f /etc/NetworkManager/dnsmasq.d/openshift.conf ]; then
@@ -234,12 +236,12 @@ EOF
 sudo systemctl reload NetworkManager
 
 # Create the INSTALL_DIR for the installer and copy the install-config
-rm -fr ${INSTALL_DIR} && mkdir ${INSTALL_DIR} && cp install-config.yaml ${INSTALL_DIR}
+rm -fr ${INSTALL_DIR} && mkdir ${INSTALL_DIR} && cp $SRC_DIR/install-config.yaml ${INSTALL_DIR}
 ${YQ} write --inplace ${INSTALL_DIR}/install-config.yaml baseDomain ${BASE_DOMAIN}
 ${YQ} write --inplace ${INSTALL_DIR}/install-config.yaml metadata.name ${CRC_VM_NAME}
 ${YQ} write --inplace ${INSTALL_DIR}/install-config.yaml compute[0].replicas 0
 ${YQ} write --inplace ${INSTALL_DIR}/install-config.yaml pullSecret "${OPENSHIFT_PULL_SECRET}"
-${YQ} write --inplace ${INSTALL_DIR}/install-config.yaml sshKey "$(cat id_rsa_crc.pub)"
+${YQ} write --inplace ${INSTALL_DIR}/install-config.yaml sshKey "$(cat $SRC_DIR/id_rsa_crc.pub)"
 
 # Create the manifests using the INSTALL_DIR
 ${OPENSHIFT_INSTALL} --dir ${INSTALL_DIR} create manifests || exit 1
@@ -280,7 +282,7 @@ create_pvs "${CRC_PV_DIR}" 30
 
 # Mark some of the deployments unmanaged by the cluster-version-operator (CVO)
 # https://github.com/openshift/cluster-version-operator/blob/master/docs/dev/clusterversion.md#setting-objects-unmanaged
-${OC} patch clusterversion version --type json -p "$(cat cvo_override.yaml)"
+${OC} patch clusterversion version --type json -p "$(cat $SRC_DIR/cvo_override.yaml)"
 
 # Clean-up 'openshift-monitoring' namespace
 delete_operator "deployment/cluster-monitoring-operator" "openshift-monitoring" "app=cluster-monitoring-operator"
@@ -309,9 +311,9 @@ ${OC} delete statefulset,deployment,daemonset --all -n openshift-insights
 ${OC} delete statefulset,deployment,daemonset --all -n openshift-cloud-credential-operator
 
 # Clean-up 'openshift-cluster-storage-operator' namespace
-#TODO error here!!
-#delete_operator "deployment.apps/csi-snapshot-controller-operator" "openshift-cluster-storage-operator" "app=csi-snapshot-controller-operator"
-
+if [ $ARCH != "ppc64le" ]; then
+    delete_operator "deployment.apps/csi-snapshot-controller-operator" "openshift-cluster-storage-operator" "app=csi-snapshot-controller-operator"
+fi
 
 ${OC} delete statefulset,deployment,daemonset --all -n openshift-cluster-storage-operator
 
