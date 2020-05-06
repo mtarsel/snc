@@ -16,9 +16,14 @@ OC=${OC:-oc}
 YQ=${YQ:-yq}
 CRC_VM_NAME=${CRC_VM_NAME:-crc}
 BASE_DOMAIN=${CRC_BASE_DOMAIN:-testing}
-MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/$ARCH/clients/ocp}
 CRC_PV_DIR="/mnt/pv-data"
 SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i $SRC_DIR/id_rsa_crc"
+
+if [ "${ARCH}" == "ppc64le" ] || [ "${ARCH}" == "s390x" ]; then
+   MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/$ARCH/clients/ocp}
+else
+  MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/clients/ocp}
+fi
 
 # If user defined the OPENSHIFT_VERSION environment variable then use it.
 # Otherwise use the tagged version if available
@@ -166,17 +171,20 @@ if ! which ${OC}; then
         curl -L "${MIRROR}/${OPENSHIFT_RELEASE_VERSION}/openshift-client-linux-${OPENSHIFT_RELEASE_VERSION}.tar.gz" | tar zx oc
     fi
     mv ./oc $SRC_DIR
+    cp $SRC_DIR/oc /usr/bin
     OC=$SRC_DIR/oc
 fi
 
 # Download yq for manipulating in place yaml configs
 if ! which ${YQ}; then
     if [[ ! -e yq ]]; then
-	if [ $ARCH == "ppc64le" ]; then
-        	curl -L https://github.com/mikefarah/yq/releases/download/3.3.0/yq_linux_ppc64le -o yq
-	else
-		curl -L https://github.com/mikefarah/yq/releases/download/3.3.0/yq_linux_amd64 -o yq
-	fi
+	if [ "${ARCH}" == "x86_64" ]; then
+	    yq_arch="amd64"
+        else
+            yq_arch=$ARCH
+        fi
+        
+	curl -L https://github.com/mikefarah/yq/releases/download/3.3.0/yq_linux_${yq_arch} -o yq
 	chmod +x yq
     fi
     mv ./yq $SRC_DIR
